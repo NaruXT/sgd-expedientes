@@ -6,3 +6,5 @@ dist/
 .env
 *.sgd-session.json
 scratch/
+# temporales de `bun build --compile`
+*.bun-build
