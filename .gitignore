@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.exe
+*.log
+.DS_Store
+.env
+*.sgd-session.json
+scratch/
