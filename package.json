@@ -1,0 +1,23 @@
+{
+  "name": "sgd-expedientes",
+  "version": "0.1.0",
+  "description": "Consulta la ubicación de expedientes en el SGD, con interfaz local para usuarios no técnicos.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun run scripts/build.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "fflate": "^0.8.3",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "read-excel-file": "^9.3.14",
+    "write-excel-file": "^4.1.1"
+  }
+}

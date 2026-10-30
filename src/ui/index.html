@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="sgd-token" content="__SGD_TOKEN__">
+  <title>SGD Expedientes</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="cabecera">
+    <div class="cabecera-interior">
+      <span class="titulo-app">SGD Expedientes</span>
+      <div class="cuenta" id="cuenta" hidden>
+        <div class="cuenta-datos">
+          <span id="cuenta-dependencia" class="cuenta-dependencia"></span>
+          <span id="cuenta-usuario" class="cuenta-usuario"></span>
+        </div>
+        <button type="button" class="boton-borde" id="btn-salir">Cerrar sesión</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="menu" id="menu" aria-label="Menú principal" hidden>
+    <div class="menu-interior">
+      <div role="tablist" aria-label="Tipo de consulta" class="menu-grupo">
+        <button type="button" role="tab" id="tab-uno" aria-selected="true" aria-controls="panel-uno">Un expediente</button>
+        <button type="button" role="tab" id="tab-lote" aria-selected="false" aria-controls="panel-lote" tabindex="-1">Varios (Excel)</button>
+      </div>
+      <button type="button" class="menu-item" id="btn-config">Configuración</button>
+    </div>
+  </nav>
+
+  <main class="contenido">
+    <div id="aviso" class="aviso" role="alert" hidden>
+      <p id="aviso-mensaje" class="aviso-mensaje"></p>
+      <p id="aviso-pista" class="aviso-pista"></p>
+    </div>
+
+    <p id="cargando" class="tenue centrado">Cargando…</p>
+
+    <section id="vista-config" class="panel estrecho" hidden aria-labelledby="titulo-config">
+      <div class="panel-cabecera">
+        <h1 id="titulo-config">Configuración</h1>
+        <p>Dirección del SGD de tu institución y su certificado de seguridad.</p>
+      </div>
+      <form id="form-config" class="panel-cuerpo" novalidate>
+        <p class="tenue">Si no tienes estos datos, pídelos a TI.</p>
+        <label for="cfg-host">Dirección del SGD</label>
+        <input id="cfg-host" type="url" inputmode="url" placeholder="https://sgd.institucion.gob.pe:8181" autocomplete="off" spellcheck="false" required>
+        <label for="cfg-ca">Certificado del SGD <span class="tenue normal">(archivo .pem, .crt o .cer)</span></label>
+        <input id="cfg-ca" type="file" accept=".pem,.crt,.cer">
+        <p id="cfg-ca-estado" class="nota"></p>
+        <div class="acciones">
+          <button type="submit" class="primario" id="cfg-guardar">Guardar</button>
+          <button type="button" class="boton-borde" id="cfg-cancelar" hidden>Cancelar</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="vista-login" class="panel estrecho" hidden aria-labelledby="titulo-login">
+      <div class="panel-cabecera">
+        <h1 id="titulo-login">Iniciar sesión</h1>
+        <p>Usa tu usuario y contraseña del SGD.</p>
+      </div>
+      <div class="panel-cuerpo">
+        <form id="form-login" novalidate>
+          <label for="login-usuario">Usuario</label>
+          <input id="login-usuario" autocomplete="username" spellcheck="false" autocapitalize="off" required>
+          <label for="login-clave">Contraseña</label>
+          <input id="login-clave" type="password" autocomplete="current-password" required>
+          <p class="nota">La contraseña no se guarda en este equipo.</p>
+          <div class="acciones">
+            <button type="submit" class="primario" id="login-enviar">Ingresar</button>
+          </div>
+        </form>
+        <div class="pie-panel">
+          <span class="nota" id="login-host"></span>
+          <button type="button" class="enlace" id="login-config">Cambiar la dirección del SGD</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="vista-consulta" hidden>
+      <div id="panel-uno" role="tabpanel" aria-labelledby="tab-uno" class="panel">
+        <div class="panel-cabecera">
+          <h1>Consulta de un expediente</h1>
+          <p>Ubicación actual del expediente en tus dependencias del SGD.</p>
+        </div>
+        <div class="panel-cuerpo">
+          <form id="form-buscar" class="fila-busqueda" novalidate>
+            <label for="buscar-termino" class="solo-lector">Número de expediente</label>
+            <input id="buscar-termino" placeholder="Número de expediente, por ejemplo EXP-20260000174" autocomplete="off" spellcheck="false" required>
+            <button type="submit" class="primario" id="buscar-enviar">Buscar</button>
+          </form>
+          <div id="buscar-progreso" class="progreso" hidden>
+            <p class="progreso-texto" id="buscar-progreso-texto" aria-live="polite"></p>
+            <progress id="buscar-barra"></progress>
+          </div>
+          <div id="buscar-resultado"></div>
+        </div>
+      </div>
+
+      <div id="panel-lote" role="tabpanel" aria-labelledby="tab-lote" class="panel" hidden>
+        <div class="panel-cabecera">
+          <h1>Consulta de varios expedientes</h1>
+          <p>Carga un Excel con hasta <strong id="lote-limite">30</strong> expedientes distintos.</p>
+        </div>
+        <div class="panel-cuerpo">
+          <div id="lote-carga">
+            <p class="tenue">Los números van en la columna A. La fila 1 es el encabezado.</p>
+            <label class="archivo" for="lote-archivo">
+              <span class="archivo-boton">Elegir archivo Excel</span>
+              <span class="archivo-nombre tenue" id="lote-archivo-nombre">Ningún archivo elegido</span>
+            </label>
+            <input id="lote-archivo" class="solo-lector" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+          </div>
+
+          <div id="lote-previa" hidden>
+            <p class="resumen" id="lote-previa-resumen"></p>
+            <details class="lista-terminos">
+              <summary>Ver los números</summary>
+              <ol id="lote-previa-lista"></ol>
+            </details>
+            <p class="nota">La consulta revisa todas tus dependencias y puede tardar varios minutos. No cierres esta ventana mientras avanza.</p>
+            <div class="acciones">
+              <button type="button" class="primario" id="lote-consultar">Consultar</button>
+              <button type="button" class="boton-borde" id="lote-otro">Elegir otro archivo</button>
+            </div>
+          </div>
+
+          <div id="lote-progreso" class="progreso" hidden>
+            <p class="progreso-texto" id="lote-progreso-texto" aria-live="polite"></p>
+            <progress id="lote-barra"></progress>
+          </div>
+
+          <div id="lote-resultado" hidden>
+            <div class="resultado-cabecera">
+              <p class="resumen" id="lote-resumen"></p>
+              <div class="acciones">
+                <button type="button" class="primario" id="lote-descargar">Descargar Excel</button>
+                <button type="button" class="boton-borde" id="lote-nuevo">Nueva consulta</button>
+              </div>
+            </div>
+            <div class="tabla-contenedor">
+              <table class="tabla">
+                <thead>
+                  <tr>
+                    <th scope="col">Expediente</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Dependencia</th>
+                    <th scope="col">Último documento</th>
+                    <th scope="col">Revisar</th>
+                  </tr>
+                </thead>
+                <tbody id="lote-filas"></tbody>
+              </table>
+            </div>
+            <p class="nota">Las filas en amarillo tienen una ubicación distinta según el origen del expediente. Conviene revisarlas en el SGD.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="pie">
+    <div class="pie-interior">
+      <div>
+        <span>SGD Expedientes</span>
+        <span id="pie-version"></span>
+      </div>
+      <div id="pie-unidad" hidden>
+        <span>Unidad orgánica:</span>
+        <strong id="pie-dependencia"></strong>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
