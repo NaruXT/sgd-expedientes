@@ -3,11 +3,15 @@
 import { loadConfig, saveConfig } from '../sgd/lib/config.ts';
 import type { Config, Session } from '../sgd/lib/config.ts';
 import { appDataDir } from '../sgd/lib/paths.ts';
+import type { AvanceLote } from '../sgd/commands/lote.ts';
 
 export class AppState {
   readonly dataDir: string;
   config: Config;
   session: Session | null = null;
+  // Avance del último lote que cortó una sesión expirada. Sobrevive al cierre de sesión
+  // para continuarlo tras el nuevo login; solo en memoria.
+  loteInterrumpido: AvanceLote | null = null;
 
   constructor(dataDir: string = appDataDir()) {
     this.dataDir = dataDir;

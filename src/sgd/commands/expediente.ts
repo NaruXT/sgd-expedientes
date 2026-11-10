@@ -214,6 +214,10 @@ export async function searchExpediente(term: string, opts: SearchOptions): Promi
       }
     }
 
+    // Con la sesión expirada, las bandejas pueden llegar vacías sin aviso. Cada cambio de
+    // dependencia ya lo detecta (lista las dependencias); falta confirmar la última.
+    await listDependencias(config, sweep);
+
     // Ubicación actual (A y B, ver ubicacion.ts) con el detalle de TODOS los nodos.
     // Por defecto en búsquedas por nº de expediente: es la pregunta principal.
     if (searchByExpediente && matches.length > 0) {
@@ -224,6 +228,7 @@ export async function searchExpediente(term: string, opts: SearchOptions): Promi
         const r = await ubicarExpediente(config, sweep, matches, 'completo');
         ({ ubicacion, ubicacionOrigen } = r);
         seguimiento = r.nodosB;
+        if (!ubicacion) await listDependencias(config, sweep); // ¿vacío por sesión expirada?
       } catch (e) {
         if (e instanceof AppError && e.code === 'session_expired') throw e;
         notifier.note('no se pudo traer el seguimiento; la ubicación queda sin dato');

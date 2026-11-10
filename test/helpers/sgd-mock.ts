@@ -19,16 +19,27 @@ export const TABLA = `<table><tr><th>Expediente</th><th>Estado</th></tr><tr><td>
 
 export interface SgdMockOptions {
   conectorStatus?: number; // fuerza un status en los conectores (ej. 302 = sesión expirada)
+  // Expira la sesión en silencio tras N llamadas a conectores, como el SGD real: la lista
+  // de dependencias y las bandejas llegan vacías en lugar de con la página de login.
+  // Un login nuevo revive la sesión y ya no vuelve a expirar.
+  expiraTrasConectores?: number;
 }
+
+const DEPS_VACIA = '<table></table>';
+const TABLA_VACIA = '<table><tr><th>Expediente</th><th>Estado</th></tr></table>';
 
 export interface SgdMock {
   host: string;
   bodyPosted(): string; // último cuerpo recibido en el POST de login
+  conectores(): number; // llamadas a conectores recibidas
   stop(): void;
 }
 
 export function startSgdMock(opts: SgdMockOptions = {}): SgdMock {
   let bodyPosted = '';
+  let conectores = 0;
+  let expirada = false;
+  let yaExpiro = false;
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -43,17 +54,23 @@ export function startSgdMock(opts: SgdMockOptions = {}): SgdMock {
         const form = new URLSearchParams(bodyPosted);
         const ok = form.get('coUsuario') === b64(USER.toUpperCase()) && form.get('dePassword') === b64(PASS);
         if (ok) {
+          expirada = false;
           return new Response(null, { status: 302, headers: { location: '/sgd/home', 'set-cookie': 'JSESSIONID=s2; Path=/' } });
         }
         return new Response(LOGIN_FORM, { status: 200, headers: { 'set-cookie': 'JSESSIONID=s1; Path=/' } });
       }
       if (pathname === '/sgd/home') return new Response(HOME);
-      if (pathname === '/sgd/4.0/cambiaDep.do') return new Response(DEPS_HTML);
+      if (pathname === '/sgd/4.0/cambiaDep.do') return new Response(expirada ? DEPS_VACIA : DEPS_HTML);
       if (pathname === '/sgd/acceso.do') return new Response('', { status: 200, headers: { 'set-cookie': 'JSESSIONID=s3; Path=/' } });
       if (pathname.startsWith('/sgd/4.0/srDocObjeto')) return new Response('no encontrado');
       if (pathname.startsWith('/sgd/4.0/')) {
         if (opts.conectorStatus) return new Response('', { status: opts.conectorStatus });
-        return new Response(TABLA);
+        conectores++;
+        if (!yaExpiro && opts.expiraTrasConectores !== undefined && conectores > opts.expiraTrasConectores) {
+          expirada = true;
+          yaExpiro = true;
+        }
+        return new Response(expirada ? TABLA_VACIA : TABLA);
       }
       return new Response('no encontrado', { status: 404 });
     },
@@ -61,6 +78,7 @@ export function startSgdMock(opts: SgdMockOptions = {}): SgdMock {
   return {
     host: `https://127.0.0.1:${server.port}`,
     bodyPosted: () => bodyPosted,
+    conectores: () => conectores,
     stop: () => server.stop(true),
   };
 }
