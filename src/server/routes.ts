@@ -5,7 +5,7 @@ import { AppError } from '../sgd/lib/errors.ts';
 import type { Config, Session } from '../sgd/lib/config.ts';
 import { performLogin, detectCoDep, detectDepName } from '../sgd/auth.ts';
 import { searchExpediente } from '../sgd/commands/expediente.ts';
-import { runLote, LIMITE_TERMINOS } from '../sgd/commands/lote.ts';
+import { runLote, LIMITE_TERMINOS, avanceAplica, nuevoAvance } from '../sgd/commands/lote.ts';
 import type { ResultadoLote } from '../sgd/commands/lote.ts';
 import { requireSession } from '../sgd/runtime.ts';
 import { leerExcelEntrada, MAX_BYTES_EXCEL } from '../excel/read-input.ts';
@@ -195,6 +195,8 @@ export async function handleApi(req: Request, url: URL, ctx: RouteContext): Prom
     }
 
     if (method === 'DELETE' && pathname === '/api/sesion') {
+      // Salir a propósito descarta también el lote a medias (a diferencia de una expiración).
+      state.loteInterrumpido = null;
       state.cerrarSesion();
       return json({ ok: true });
     }
@@ -224,15 +226,23 @@ export async function handleApi(req: Request, url: URL, ctx: RouteContext): Prom
       }
       const terminos = body.terminos as string[];
       return encolarSiSesion(ctx, 'lote', async (session, notifier) => {
-        const outcome = await runLote({
-          config: state.config,
-          session,
-          year: ctx.year(),
-          terminos,
-          notifier,
-        });
-        state.session = outcome.session;
-        return { resultados: outcome.resultados };
+        // Mismo lote y mismo usuario que uno cortado por la sesión: continúa desde ahí.
+        const previo = state.loteInterrumpido;
+        const avance = avanceAplica(previo, session.user, terminos) ? previo : nuevoAvance(session.user, terminos);
+        state.loteInterrumpido = null;
+        try {
+          const outcome = await runLote({ config: state.config, session, year: ctx.year(), terminos, notifier, avance });
+          state.session = outcome.session;
+          return { resultados: outcome.resultados };
+        } catch (e) {
+          if (e instanceof AppError && e.code === 'session_expired') {
+            state.loteInterrumpido = avance;
+            throw new AppError('session_expired', 'la sesión del SGD expiró a mitad de la consulta', {
+              hint: 'inicia sesión otra vez y presiona Continuar: la consulta sigue desde donde quedó',
+            });
+          }
+          throw e;
+        }
       });
     }
 

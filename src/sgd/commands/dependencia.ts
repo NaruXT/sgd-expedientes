@@ -46,6 +46,13 @@ export async function listDependencias(config: Config, session: Session): Promis
     const sigla = cells.find((c) => /^[A-Z][A-Z-]{1,15}$/.test(c)) ?? null;
     out.push({ coDep: m[1], nombre: m[2].trim(), sigla });
   }
+  // Todo usuario con sesión tiene al menos una dependencia. Una lista vacía es la forma
+  // en que el SGD responde cuando la sesión ya expiró (sin redirigir al login).
+  if (out.length === 0) {
+    throw new AppError('session_expired', 'la sesión del SGD expiró', {
+      hint: 'vuelve a iniciar sesión para continuar',
+    });
+  }
   return out;
 }
 

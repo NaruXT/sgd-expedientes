@@ -10,7 +10,7 @@ import type { RunningServer } from '../src/server/server.ts';
 import writeXlsxFile from 'write-excel-file/node';
 import { readSheet } from 'read-excel-file/node';
 import { CERT, PASS, USER, startSgdMock } from './helpers/sgd-mock.ts';
-import type { SgdMock } from './helpers/sgd-mock.ts';
+import type { SgdMock, SgdMockOptions } from './helpers/sgd-mock.ts';
 
 const abiertos: { server: RunningServer; mock?: SgdMock; dir: string }[] = [];
 
@@ -22,10 +22,10 @@ afterEach(() => {
   }
 });
 
-function arrancar(conMock = false) {
+function arrancar(conMock = false, opcionesMock: SgdMockOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'sgd-exp-srv-'));
   const server = startServer({ port: 0, dataDir: dir, year: () => '2026' });
-  const mock = conMock ? startSgdMock() : undefined;
+  const mock = conMock ? startSgdMock(opcionesMock) : undefined;
   abiertos.push({ server, mock, dir });
   return { server, mock, dir };
 }
@@ -212,6 +212,62 @@ describe('sesión, búsqueda y lote contra el SGD de prueba', () => {
     const fin = await trabajo(server, lote.json.trabajo);
     expect(fin.estado).toBe('error');
     expect(fin.error.code).toBe('usage');
+  });
+});
+
+describe('sesión que expira a mitad de un lote', () => {
+  // 12 expedientes: 2 grupos de búsqueda (10 + 2). El único que existe en el SGD de
+  // prueba es el último. Cada expediente usa 2 conectores (recepción y emisión), así
+  // que la sesión muere dentro del segundo grupo.
+  const terminos = [...Array.from({ length: 11 }, (_, i) => `EXP-2026000${String(i).padStart(4, '0')}`), 'EXP-20260000174'];
+
+  async function conSesion(opciones: SgdMockOptions) {
+    const { server, mock } = arrancar(true, opciones);
+    await api(server, 'PUT', '/api/configuracion', { host: mock!.host, ca: CERT });
+    await trabajo(server, (await api(server, 'POST', '/api/sesion', { usuario: USER, clave: PASS })).json.trabajo);
+    return { server, mock: mock! };
+  }
+
+  test('la expiración silenciosa no marca expedientes como no encontrados: el lote avisa que la sesión expiró', async () => {
+    const { server } = await conSesion({ expiraTrasConectores: 21 });
+    const fin = await trabajo(server, (await api(server, 'POST', '/api/lote', { terminos })).json.trabajo);
+    expect(fin.estado).toBe('error');
+    expect(fin.error.code).toBe('session_expired');
+    expect(fin.error.hint).toContain('Continuar');
+    expect((await api(server, 'GET', '/api/estado')).json.usuario).toBeNull();
+  });
+
+  test('tras volver a iniciar sesión, el mismo lote continúa desde el último grupo verificado', async () => {
+    const { server, mock } = await conSesion({ expiraTrasConectores: 21 });
+    await trabajo(server, (await api(server, 'POST', '/api/lote', { terminos })).json.trabajo);
+    const antes = mock.conectores();
+
+    await trabajo(server, (await api(server, 'POST', '/api/sesion', { usuario: USER, clave: PASS })).json.trabajo);
+    const fin = await trabajo(server, (await api(server, 'POST', '/api/lote', { terminos })).json.trabajo);
+    expect(fin.estado).toBe('listo');
+    const encontrado = fin.resultado.resultados.find((r: { term: string }) => r.term === 'EXP-20260000174');
+    expect(encontrado.count).toBeGreaterThan(0);
+    // Solo se repite el segundo grupo (2 expedientes x 2 conectores), no el primero.
+    expect(mock.conectores() - antes).toBe(4);
+    expect(fin.notas.join(' ')).toContain('continúa');
+  });
+
+  test('la búsqueda de un expediente también detecta la expiración silenciosa', async () => {
+    const { server } = await conSesion({ expiraTrasConectores: 1 });
+    const fin = await trabajo(server, (await api(server, 'POST', '/api/busqueda', { termino: 'EXP-20260000174' })).json.trabajo);
+    expect(fin.estado).toBe('error');
+    expect(fin.error.code).toBe('session_expired');
+  });
+
+  test('un lote distinto no reutiliza el avance interrumpido', async () => {
+    const { server, mock } = await conSesion({ expiraTrasConectores: 21 });
+    await trabajo(server, (await api(server, 'POST', '/api/lote', { terminos })).json.trabajo);
+    await trabajo(server, (await api(server, 'POST', '/api/sesion', { usuario: USER, clave: PASS })).json.trabajo);
+    const antes = mock.conectores();
+    const otro = terminos.slice(1);
+    const fin = await trabajo(server, (await api(server, 'POST', '/api/lote', { terminos: otro })).json.trabajo);
+    expect(fin.estado).toBe('listo');
+    expect(mock.conectores() - antes).toBe(otro.length * 2);
   });
 });
 

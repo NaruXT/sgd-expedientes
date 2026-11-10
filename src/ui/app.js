@@ -338,6 +338,15 @@ $('form-buscar').addEventListener('submit', async (ev) => {
 let terminosLote = [];
 let trabajoLote = null;
 
+// Tras una sesión expirada el servidor guarda el avance: el mismo lote continúa.
+function marcarLoteInterrumpido(si) {
+  $('lote-consultar').textContent = si ? 'Continuar' : 'Consultar';
+  if (si) {
+    $('lote-previa-resumen').textContent =
+      'La consulta quedó a medias porque la sesión del SGD expiró. Presiona Continuar para seguir desde donde quedó.';
+  }
+}
+
 function mostrarPasoLote(paso) {
   $('lote-carga').hidden = paso !== 'carga' && paso !== 'previa';
   $('lote-previa').hidden = paso !== 'previa';
@@ -348,6 +357,7 @@ function mostrarPasoLote(paso) {
 function limpiarConsulta() {
   terminosLote = [];
   trabajoLote = null;
+  marcarLoteInterrumpido(false);
   $('lote-archivo').value = '';
   $('lote-archivo-nombre').textContent = 'Ningún archivo elegido';
   $('buscar-resultado').replaceChildren();
@@ -364,6 +374,7 @@ $('lote-archivo').addEventListener('change', async () => {
   try {
     const previa = await api('POST', '/api/lote/excel', { binario: await archivo.arrayBuffer() });
     terminosLote = previa.terminos;
+    marcarLoteInterrumpido(false);
     const repetidos =
       previa.duplicados > 0 ? ` (${plural(previa.duplicados, 'fila repetida se consulta', 'filas repetidas se consultan')} una sola vez)` : '';
     $('lote-previa-resumen').textContent = `${plural(previa.terminos.length, 'expediente distinto', 'expedientes distintos')} para consultar${repetidos}.`;
@@ -390,6 +401,7 @@ function renderLote(resultados) {
   const partes = [`${ubicados} de ${plural(resultados.length, 'expediente ubicado', 'expedientes ubicados')}`];
   if (difieren > 0) partes.push(`${difieren} para revisar`);
   $('lote-resumen').textContent = partes.join(' · ');
+  $('lote-nota-revisar').hidden = difieren === 0;
 
   const filas = resultados.map((r) => {
     const u = r.ubicacion;
@@ -426,8 +438,10 @@ $('lote-consultar').addEventListener('click', async () => {
       actualizarBarra($('lote-barra'), t);
     });
     renderLote(resultados);
+    marcarLoteInterrumpido(false);
     mostrarPasoLote('resultado');
   } catch (error) {
+    if (error.code === 'session_expired') marcarLoteInterrumpido(true);
     mostrarPasoLote('previa');
     await manejarError(error);
   } finally {
