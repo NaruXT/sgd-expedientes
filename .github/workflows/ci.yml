@@ -1,0 +1,108 @@
+# Tipos, tests y compilación en cada pull request y en cada push a main.
+# Ningún paso se conecta a un SGD real: los tests usan un SGD simulado.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: 1.3.14
+
+jobs:
+  pruebas:
+    name: Tipos y tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows es la plataforma prioritaria de la app.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+  compilacion:
+    name: Compilación
+    needs: pruebas
+    # macOS: los ejecutables de Mac se re-firman ad-hoc con codesign (ver scripts/build.ts).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
+      - name: Verificar sumas y firmas
+        run: |
+          cd dist/*/
+          shasum -a 256 -c SHA256SUMS.txt
+          for f in sgd-expedientes-*-macos-*; do codesign --verify --strict "$f"; done
+
+      - name: Probar que el ejecutable de Mac arranca y sirve la interfaz
+        run: |
+          BIN=$(ls dist/*/sgd-expedientes-*-macos-arm64)
+          SGD_NO_ABRIR=1 SGD_PORT=8765 "$BIN" &
+          PID=$!
+          for i in $(seq 1 50); do curl -sf -o /dev/null http://127.0.0.1:8765/ && break; sleep 0.2; done
+          curl -sf http://127.0.0.1:8765/ | grep -q 'name="sgd-token"'
+          curl -sf -o /dev/null http://127.0.0.1:8765/app.js
+          curl -sf -o /dev/null http://127.0.0.1:8765/styles.css
+          kill "$PID"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ejecutables
+          path: dist/
+          retention-days: 7
+
+  prueba-windows:
+    name: Ejecutable en Windows
+    needs: compilacion
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ejecutables
+          path: dist
+
+      - name: Verificar el hash del ejecutable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Recurse -Filter 'sgd-expedientes-*-windows-x64.exe' | Select-Object -First 1
+          $sumas = Get-Content (Join-Path $exe.DirectoryName 'SHA256SUMS.txt')
+          $esperado = ($sumas | Where-Object { $_ -like "*  $($exe.Name)" }).Split(' ')[0]
+          $real = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($real -ne $esperado) { throw "hash distinto: $real (esperado $esperado)" }
+
+      - name: Probar que el ejecutable arranca y sirve la interfaz
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Recurse -Filter 'sgd-expedientes-*-windows-x64.exe' | Select-Object -First 1
+          $env:SGD_NO_ABRIR = '1'
+          $env:SGD_PORT = '8765'
+          $proceso = Start-Process -FilePath $exe.FullName -PassThru -NoNewWindow
+          $respuesta = $null
+          for ($i = 0; $i -lt 50; $i++) {
+            try { $respuesta = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/; break }
+            catch { Start-Sleep -Milliseconds 200 }
+          }
+          if (-not $respuesta) { throw 'el ejecutable no respondió' }
+          if ($respuesta.Content -notmatch 'name="sgd-token"') { throw 'la página no trae el token' }
+          Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/app.js | Out-Null
+          Stop-Process -Id $proceso.Id
